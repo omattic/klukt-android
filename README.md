@@ -1,44 +1,62 @@
 # Offline Notes
 
-Minimal, native Android research prototype for face-to-face transfer of signed **test-only** notes. It has no INTERNET permission and no service dependency.
+Native Android research prototype for **test value only**. It transfers fixed-denomination, issuer-signed notes between paired phones with Bluetooth Classic RFCOMM. It has no internet permission, cloud, backend, Google Nearby, Wi-Fi router, mining, consensus, or blockchain framework.
 
-## What works
+## Security boundary and protocol
 
-* Mint a local 10-unit test note, persist it with Room, and retain it over app restarts and phone reboots.
-* Transfer a signed ownership history over a paired Bluetooth Classic RFCOMM connection.
-* Validate every signature before accepting a received note. A received note becomes the recipient's locally transferable note.
-* Require both people to confirm a transcript-derived six-digit code before the note travels.
-* Report the actual Android API level, StrongBox feature flag, and Android Keystore identity-key security level, with an optional experimental usage-count probe.
+This authenticates an issuer and append-only ownership histories. It does not prevent a compromised sender from giving conflicting histories to different offline recipients. A matching code identifies the Bluetooth session only. Android Keystore, APK signatures, feature flags, and old attestation are not proof that a remote phone is currently uncompromised.
 
-## Critical limitations
+A v1 note includes version, `offline-notes-test-v1`, issuer public key, issuer-scoped serial, positive integer denomination, initial owner key, issuer signature, and transfers. Transfers commit to domain, version, network, issuer, serial, denomination, previous-state digest, recipient key, transfer ID, recipient-generated cryptographic nonce, and sender key. Canonical signed bytes are deterministic UTF-8 `name:byteLength:value\n` fields, never JSON. The JVM vector test verifies this and rejects altered/untrusted notes.
 
-This is not money, a blockchain, or a double-spend solution. A malicious or compromised sender can create conflicting signed histories for the same note. The recipient validates only the submitted history and its own local database. Bluetooth pairing and a matching code identify the session counterpart, not a globally unique spend.
+V1 pays exact existing notes only. It has no splitting, merging, change-making, or atomic multi-note payment.
 
-Android Keystore protects a private key according to a device's actual capabilities. It is not programmable secure-element storage, does not contain a trusted mutable balance, and usage-count experiments do not make an offline note globally single-use. No attestation, APK signature, feature flag, or old device evidence proves that a remote phone is currently uncompromised.
+## Pinned macOS command-line stack
 
-## Build without Android Studio
+| Component | Pin |
+| --- | --- |
+| JDK | Temurin/OpenJDK 17 |
+| Gradle wrapper | 8.10.2, SHA-256 pinned in `gradle-wrapper.properties` |
+| Android Gradle Plugin | 8.8.2 |
+| Kotlin and Compose compiler | 2.0.21 |
+| SDK and build tools | Android 35, 35.0.0 |
+| Compose BOM / Room | 2025.02.00 / 2.6.1 |
 
-Install JDK 17 and Android SDK Platform 35, then run:
+The repository includes `gradlew`, the wrapper JAR, and a distribution checksum. Neither global Gradle nor Android Studio is required. `scripts/android-env.sh` supports Apple Silicon and Intel and never changes shell settings or accepts licenses. First dependency downloads need internet. Offline wallet operation does not. Offline builds require cached dependencies and SDK packages, then use `./gradlew --offline`.
 
-```bash
-./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest
-```
+## Setup, build, and test
 
-The debug app is `app/build/outputs/apk/debug/app-debug.apk`.
-
-## Physical-device procedure
-
-Connect the Pixel phones by USB, unlock each, enable Developer options and USB debugging, then report the output of:
+Install JDK 17 by a method you trust, for example `brew install --cask temurin17`. Download Android's macOS command-line tools from the official Android developer site and place `sdkmanager` at `$HOME/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager`.
 
 ```bash
-adb devices -l
-for serial in $(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }'); do
-  adb -s "$serial" shell getprop ro.product.model
-  adb -s "$serial" shell getprop ro.build.version.release
-  adb -s "$serial" shell getprop ro.build.version.sdk
-  adb -s "$serial" shell pm list features | grep -E 'strongbox|bluetooth' || true
-done
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+scripts/android-env.sh
+# Review and explicitly accept this yourself:
+$HOME/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root="$HOME/Library/Android/sdk" --licenses
+scripts/android-sdk-install.sh
+scripts/android-doctor.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 ```
 
-Pair two phones in Android Settings. Grant Nearby devices to Offline Notes. On the receiver tap **Receive**. On the sender mint a note, tap **Send to paired phone**, select the same note, choose the paired receiver, compare the displayed code, then tap **Confirm matching code on both phones**. The receiver should show the test note. Repeat from that receiver to a third phone, then force-stop/reopen the app before repeating to demonstrate persistence.
+For an attached, authorised USB device:
+
+```bash
+scripts/android-device.sh ADB_SERIAL
+scripts/android-install.sh ADB_SERIAL
+scripts/android-test.sh ADB_SERIAL
+```
+
+The final command runs instrumentation coverage and saves filtered logcat output in `build/offline-notes-ADB_SERIAL.log`.
+
+## Local development issuer and USB provisioning
+
+Issuer private keys never belong in the APK or repository. Create one outside the repository, copy a wallet public key from developer controls, then issue a file:
+
+```bash
+tools/issue-test-note.sh init "$HOME/.offline-notes-test-issuer.pem"
+tools/issue-test-note.sh issue "$HOME/.offline-notes-test-issuer.pem" WALLET_PUBLIC_KEY_BASE64 10 ./note.note.json
+```
+
+Provision the JSON by USB or a local file transfer. Explicitly import the issuer public key in developer controls before importing its note. Unknown issuers, duplicate notes, malformed data, wrong networks, bad signatures, changed histories, and wrongly addressed notes are rejected.
+
+## Physical transfer
+
+Pair phones in Android Settings. Receiver grants Nearby devices and taps Receive. Sender selects a spendable note and a paired phone. Both compare and explicitly confirm the same six-digit code. Restart the app before the next transfer to check persistence. Hardware diagnostics remain experiments, not proof of payment security.

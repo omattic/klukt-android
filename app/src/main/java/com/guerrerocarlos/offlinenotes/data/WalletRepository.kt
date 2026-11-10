@@ -2,43 +2,43 @@ package com.guerrerocarlos.offlinenotes.data
 
 import androidx.room.withTransaction
 import com.guerrerocarlos.offlinenotes.crypto.WalletKey
-import com.guerrerocarlos.offlinenotes.model.Genesis
-import com.guerrerocarlos.offlinenotes.model.NotePayload
+import com.guerrerocarlos.offlinenotes.model.CanonicalBytes
 import com.guerrerocarlos.offlinenotes.model.NoteVerifier
+import com.guerrerocarlos.offlinenotes.model.OwnershipTransfer
 import com.guerrerocarlos.offlinenotes.model.SignedNote
-import com.guerrerocarlos.offlinenotes.model.Transfer
+import com.guerrerocarlos.offlinenotes.model.PROTOCOL_VERSION
+import com.guerrerocarlos.offlinenotes.model.TEST_NETWORK
+import java.security.SecureRandom
+import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class WalletRepository(private val db: WalletDatabase, private val key: WalletKey) {
     private val json = Json { ignoreUnknownKeys = false }
     fun held(): Flow<List<NoteEntity>> = db.notes().held()
-    suspend fun mint(value: Long): SignedNote {
-        require(value > 0)
-        val owner = key.publicKey(); val now = System.currentTimeMillis(); val id = UUID.randomUUID().toString()
-        val genesis = Genesis(id, value, now, owner, key.sign(NotePayload.genesis(id, value, now, owner)))
-        val note = SignedNote(genesis)
-        db.notes().insert(NoteEntity(id, json.encodeToString(note), true, now))
-        return note
+    suspend fun trustIssuer(publicKey: String, label: String) {
+        check(NoteVerifier.verify(publicKey, "probe".toByteArray(), "invalid") == false) { "Impossible" }
+        db.notes().trustIssuer(TrustedIssuerEntity(publicKey.trim(), label.ifBlank { "Imported test issuer" }, System.currentTimeMillis()))
     }
-    suspend fun prepareTransfer(id: String, recipientKey: String): SignedNote = db.withTransaction {
-        val source = requireNotNull(db.notes().byId(id)) { "Unknown note" }
-        check(source.held) { "Note has already been transferred locally" }
-        val note = json.decodeFromString<SignedNote>(source.json)
-        check(NoteVerifier.verify(note) == null) { "Stored note has an invalid history" }
-        check(note.currentOwnerKey == key.publicKey()) { "This wallet is not current owner" }
-        val now = System.currentTimeMillis(); val nonce = UUID.randomUUID().toString()
-        val payload = NotePayload.transfer(note, key.publicKey(), recipientKey, now, nonce)
-        note.copy(transfers = note.transfers + Transfer(key.publicKey(), recipientKey, now, nonce, key.sign(payload)))
+    suspend fun importProvisionedNote(rawJson: String) {
+        val note = json.decodeFromString<SignedNote>(rawJson)
+        receive(note)
     }
-    suspend fun markTransferred(id: String) = db.withTransaction {
-        check(db.notes().markTransferred(id) == 1) { "Note changed while sending" }
+    suspend fun prepareTransfer(id: String, recipientKey: String, recipientNonce: String): SignedNote = db.withTransaction {
+        val source = requireNotNull(db.notes().byId(id)) { "Unknown note" }; check(source.held) { "Note is outgoing or already transferred" }
+        val note = json.decodeFromString<SignedNote>(source.json); val trusted = db.notes().trustedIssuerKeys().toSet()
+        check(NoteVerifier.verify(note, trusted) == null) { "Stored note fails validation" }; check(note.currentOwnerKey == key.publicKey()) { "This wallet is not the owner" }
+        val t = OwnershipTransfer(PROTOCOL_VERSION, TEST_NETWORK, note.issued.issuerId, note.issued.serial, note.issued.denomination, CanonicalBytes.stateDigest(note), recipientKey, UUID.randomUUID().toString(), recipientNonce, key.publicKey(), "")
+        val signed = t.copy(signature = key.sign(CanonicalBytes.transfer(t)))
+        note.copy(transfers = note.transfers + signed)
     }
+    suspend fun markTransferred(id: String) = db.withTransaction { check(db.notes().markTransferred(id) == 1) { "Note changed while sending" } }
     suspend fun receive(note: SignedNote) = db.withTransaction {
-        check(NoteVerifier.verify(note) == null) { "Rejected note: invalid signature history" }
+        val trusted = db.notes().trustedIssuerKeys().toSet(); check(NoteVerifier.verify(note, trusted) == null) { "Rejected note: untrusted issuer or invalid history" }
         check(note.currentOwnerKey == key.publicKey()) { "Rejected note: addressed to a different wallet" }
-        db.notes().insert(NoteEntity(note.genesis.noteId, json.encodeToString(note), true, System.currentTimeMillis()))
+        db.notes().insert(NoteEntity(note.noteId, json.encodeToString(note), true, System.currentTimeMillis()))
     }
+    fun testNonce(): String = ByteArray(32).also { SecureRandom().nextBytes(it) }.let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
 }

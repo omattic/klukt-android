@@ -15,7 +15,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-@Serializable private data class Hello(val key: String, val nonce: String)
+@Serializable private data class Hello(val key: String, val nonce: String, val receiveNonce: String)
 @Serializable private data class WireNote(val note: SignedNote)
 
 /** Paired-device RFCOMM transport. Bluetooth pairing is done in Android Settings, not silently by this app. */
@@ -31,11 +31,11 @@ class BluetoothTransfer(context: Context) {
         val n = ((raw[0].toInt() and 255) shl 16 or ((raw[1].toInt() and 255) shl 8) or (raw[2].toInt() and 255)) % 1_000_000
         return "%06d".format(n)
     }
-    @SuppressLint("MissingPermission") suspend fun receive(myKey: String, confirmCode: suspend (String) -> Boolean): SignedNote = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    @SuppressLint("MissingPermission") suspend fun receive(myKey: String, receiveNonce: String, confirmCode: suspend (String) -> Boolean): SignedNote = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         requireNotNull(adapter) { "Bluetooth unavailable" }.listenUsingRfcommWithServiceRecord("Offline Notes", serviceId).use { server ->
             server.accept(120_000).use { socket ->
                 val reader = BufferedReader(InputStreamReader(socket.inputStream)); val writer = OutputStreamWriter(socket.outputStream)
-                val peer = json.decodeFromString<Hello>(reader.readLine()); val me = Hello(myKey, UUID.randomUUID().toString())
+                val peer = json.decodeFromString<Hello>(reader.readLine()); val me = Hello(myKey, UUID.randomUUID().toString(), receiveNonce)
                 writer.write(json.encodeToString(me) + "\n"); writer.flush()
                 check(confirmCode(code(peer, me))) { "Pairing code was not confirmed" }
                 writer.write("OK\n"); writer.flush()
@@ -43,15 +43,15 @@ class BluetoothTransfer(context: Context) {
             }
         }
     }
-    @SuppressLint("MissingPermission") suspend fun send(device: BluetoothDevice, noteFor: suspend (String) -> SignedNote, myKey: String, confirmCode: suspend (String) -> Boolean) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    @SuppressLint("MissingPermission") suspend fun send(device: BluetoothDevice, noteFor: suspend (String, String) -> SignedNote, myKey: String, confirmCode: suspend (String) -> Boolean) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         device.createRfcommSocketToServiceRecord(serviceId).use { socket ->
             socket.connect()
             val reader = BufferedReader(InputStreamReader(socket.inputStream)); val writer = OutputStreamWriter(socket.outputStream)
-            val me = Hello(myKey, UUID.randomUUID().toString()); writer.write(json.encodeToString(me) + "\n"); writer.flush()
+            val me = Hello(myKey, UUID.randomUUID().toString(), ""); writer.write(json.encodeToString(me) + "\n"); writer.flush()
             val peer = json.decodeFromString<Hello>(reader.readLine())
             check(confirmCode(code(me, peer))) { "Pairing code was not confirmed" }
             check(reader.readLine() == "OK") { "Receiver did not confirm the pairing code" }
-            writer.write(json.encodeToString(WireNote(noteFor(peer.key))) + "\n"); writer.flush()
+            writer.write(json.encodeToString(WireNote(noteFor(peer.key, peer.receiveNonce))) + "\n"); writer.flush()
         }
     }
 }

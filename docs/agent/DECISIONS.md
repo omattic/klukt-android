@@ -1,6 +1,6 @@
 # Decisions
 
-* A note is a JSON-serialized genesis record plus an append-only sequence of signed ownership transfers. Canonical payload strings are constructed by the app, then UTF-8 signed using ECDSA P-256 with SHA-256.
+* A note is issuer-signed fixed-denomination data plus an append-only sequence of signed ownership transfers. JSON only transports/stores the object. Signatures cover deterministic, byte-length-prefixed UTF-8 fields using ECDSA P-256 with SHA-256.
 * The locally held note is immediately spendable after receive because each outgoing transfer adds a new signature by the receiver's Android Keystore identity key.
 * Bluetooth Classic RFCOMM is the only transaction transport. Users pair devices through Android Settings first, compare a short transcript-derived code, and explicitly confirm it on both devices before a note is sent.
 * This does not prevent a compromised sender from signing conflicting histories. The receiver validates only the submitted chain and local conflict state.

@@ -30,8 +30,9 @@ class WalletKey(private val context: Context) {
         return keyStore.getEntry(alias, null) as KeyStore.PrivateKeyEntry
     }
     fun publicKey(): String = Base64.getEncoder().encodeToString(entry().certificate.publicKey.encoded)
-    fun sign(payload: String): String = Base64.getEncoder().encodeToString(Signature.getInstance("SHA256withECDSA").apply {
-        initSign(entry().privateKey); update(payload.toByteArray(StandardCharsets.UTF_8))
+    fun sign(payload: String): String = sign(payload.toByteArray(StandardCharsets.UTF_8))
+    fun sign(payload: ByteArray): String = Base64.getEncoder().encodeToString(Signature.getInstance("SHA256withECDSA").apply {
+        initSign(entry().privateKey); update(payload)
     }.sign())
 
     fun diagnostic(): String {
