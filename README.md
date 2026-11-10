@@ -23,6 +23,8 @@ V1 pays exact existing notes only. It has no splitting, merging, change-making, 
 
 The repository includes `gradlew`, the wrapper JAR, and a distribution checksum. Neither global Gradle nor Android Studio is required. `scripts/android-env.sh` supports Apple Silicon and Intel and never changes shell settings or accepts licenses. First dependency downloads need internet. Offline wallet operation does not. Offline builds require cached dependencies and SDK packages, then use `./gradlew --offline`.
 
+Dependencies are deliberately limited: Compose Material 3 renders the native UI, Lifecycle/ViewModel and coroutines keep UI work off the main thread, Room supplies transactional durable state, Kotlin serialization handles bounded transport/storage JSON, and Android platform Bluetooth/Keystore provide local connection and non-exportable keys. There is no DI framework, backend SDK, analytics, Firebase, web view, or advertising dependency.
+
 ## Setup, build, and test
 
 Install JDK 17 by a method you trust, for example `brew install --cask temurin17`. Download Android's macOS command-line tools from the official Android developer site and place `sdkmanager` at `$HOME/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager`.
