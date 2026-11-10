@@ -55,12 +55,15 @@ class WalletKey(private val context: Context) {
         return try {
         val experimentAlias = "offline_notes_single_use_probe"
         store().deleteEntry(experimentAlias)
-        KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
+        val pair = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
             initialize(KeyGenParameterSpec.Builder(experimentAlias, KeyProperties.PURPOSE_SIGN)
                 .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1")).setDigests(KeyProperties.DIGEST_SHA256)
                 .setMaxUsageCount(1).build())
         }.generateKeyPair()
-        "Experimental usage-limited key created. Sign once from a controlled test, then inspect KeyInfo. This cannot prevent a conflicting note history."
+        val first = Signature.getInstance("SHA256withECDSA").apply { initSign(pair.private); update("one-use-probe".toByteArray()) }.sign()
+        val verified = Signature.getInstance("SHA256withECDSA").apply { initVerify(pair.public); update("one-use-probe".toByteArray()) }.verify(first)
+        val second = runCatching { Signature.getInstance("SHA256withECDSA").apply { initSign(pair.private); update("second-use".toByteArray()) }.sign(); "unexpectedly succeeded" }.getOrElse { "failed: ${it.javaClass.simpleName}: ${it.message}" }
+        "Experimental one-use key: first signature verified=$verified; second use $second. Repeat after restart/reboot manually. This is not remote proof or double-spend prevention."
         } catch (e: StrongBoxUnavailableException) { "Experiment unavailable: ${e.message}" } catch (e: Exception) { "Experiment unsupported: ${e.javaClass.simpleName}: ${e.message}" }
     }
 }

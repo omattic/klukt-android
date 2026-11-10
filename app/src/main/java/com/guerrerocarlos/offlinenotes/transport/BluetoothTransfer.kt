@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.guerrerocarlos.offlinenotes.model.SignedNote
 import java.io.BufferedReader
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.security.MessageDigest
@@ -20,6 +21,8 @@ import kotlinx.serialization.json.Json
 
 /** Paired-device RFCOMM transport. Bluetooth pairing is done in Android Settings, not silently by this app. */
 class BluetoothTransfer(context: Context) {
+    private val maxHandshakeBytes = 8 * 1024
+    private val maxPaymentBytes = 256 * 1024
     private val adapter = (context.getSystemService(BluetoothManager::class.java)).adapter
     private val json = Json
     private val serviceId = UUID.fromString("5c9b6ee0-a9a3-4c56-ae13-8b3fe6a58c32")
@@ -31,26 +34,30 @@ class BluetoothTransfer(context: Context) {
         val n = ((raw[0].toInt() and 255) shl 16 or ((raw[1].toInt() and 255) shl 8) or (raw[2].toInt() and 255)) % 1_000_000
         return "%06d".format(n)
     }
+    private fun readFrame(input: InputStream, limit: Int): String {
+        val bytes = ArrayList<Byte>(minOf(limit, 1024)); while (true) { val b = input.read(); check(b >= 0) { "Peer disconnected" }; if (b == '\n'.code) break; check(bytes.size < limit) { "Peer frame too large" }; bytes += b.toByte() }
+        return bytes.toByteArray().toString(Charsets.UTF_8)
+    }
     @SuppressLint("MissingPermission") suspend fun receive(myKey: String, receiveNonce: String, confirmCode: suspend (String) -> Boolean): SignedNote = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         requireNotNull(adapter) { "Bluetooth unavailable" }.listenUsingRfcommWithServiceRecord("Offline Notes", serviceId).use { server ->
             server.accept(120_000).use { socket ->
-                val reader = BufferedReader(InputStreamReader(socket.inputStream)); val writer = OutputStreamWriter(socket.outputStream)
-                val peer = json.decodeFromString<Hello>(reader.readLine()); val me = Hello(myKey, UUID.randomUUID().toString(), receiveNonce)
+                val writer = OutputStreamWriter(socket.outputStream)
+                val peer = json.decodeFromString<Hello>(readFrame(socket.inputStream, maxHandshakeBytes)); val me = Hello(myKey, UUID.randomUUID().toString(), receiveNonce)
                 writer.write(json.encodeToString(me) + "\n"); writer.flush()
                 check(confirmCode(code(peer, me))) { "Pairing code was not confirmed" }
                 writer.write("OK\n"); writer.flush()
-                json.decodeFromString<WireNote>(reader.readLine()).note
+                json.decodeFromString<WireNote>(readFrame(socket.inputStream, maxPaymentBytes)).note
             }
         }
     }
     @SuppressLint("MissingPermission") suspend fun send(device: BluetoothDevice, noteFor: suspend (String, String) -> SignedNote, myKey: String, confirmCode: suspend (String) -> Boolean) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         device.createRfcommSocketToServiceRecord(serviceId).use { socket ->
             socket.connect()
-            val reader = BufferedReader(InputStreamReader(socket.inputStream)); val writer = OutputStreamWriter(socket.outputStream)
+            val writer = OutputStreamWriter(socket.outputStream)
             val me = Hello(myKey, UUID.randomUUID().toString(), ""); writer.write(json.encodeToString(me) + "\n"); writer.flush()
-            val peer = json.decodeFromString<Hello>(reader.readLine())
+            val peer = json.decodeFromString<Hello>(readFrame(socket.inputStream, maxHandshakeBytes))
             check(confirmCode(code(me, peer))) { "Pairing code was not confirmed" }
-            check(reader.readLine() == "OK") { "Receiver did not confirm the pairing code" }
+            check(readFrame(socket.inputStream, maxHandshakeBytes) == "OK") { "Receiver did not confirm the pairing code" }
             writer.write(json.encodeToString(WireNote(noteFor(peer.key, peer.receiveNonce))) + "\n"); writer.flush()
         }
     }

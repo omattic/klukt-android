@@ -9,6 +9,7 @@ import com.guerrerocarlos.offlinenotes.model.SignedNote
 import com.guerrerocarlos.offlinenotes.model.PROTOCOL_VERSION
 import com.guerrerocarlos.offlinenotes.model.TEST_NETWORK
 import java.security.SecureRandom
+import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
@@ -30,9 +31,15 @@ class WalletRepository(private val db: WalletDatabase, private val key: WalletKe
         val source = requireNotNull(db.notes().byId(id)) { "Unknown note" }; check(source.held) { "Note is outgoing or already transferred" }
         val note = json.decodeFromString<SignedNote>(source.json); val trusted = db.notes().trustedIssuerKeys().toSet()
         check(NoteVerifier.verify(note, trusted) == null) { "Stored note fails validation" }; check(note.currentOwnerKey == key.publicKey()) { "This wallet is not the owner" }
+        require(note.transfers.size < 64) { "Note history limit reached" }
         val t = OwnershipTransfer(PROTOCOL_VERSION, TEST_NETWORK, note.issued.issuerId, note.issued.serial, note.issued.denomination, CanonicalBytes.stateDigest(note), recipientKey, UUID.randomUUID().toString(), recipientNonce, key.publicKey(), "")
         val signed = t.copy(signature = key.sign(CanonicalBytes.transfer(t)))
-        note.copy(transfers = note.transfers + signed)
+        val payload = note.copy(transfers = note.transfers + signed)
+        val wire = json.encodeToString(payload)
+        val digest = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(wire.toByteArray()))
+        check(db.notes().markTransferred(id) == 1) { "Note changed while reserving" }
+        db.notes().insertOutbox(OutboxEntity(signed.transferId, wire, digest, "SIGNED", 0, System.currentTimeMillis()))
+        payload
     }
     suspend fun markTransferred(id: String) = db.withTransaction { check(db.notes().markTransferred(id) == 1) { "Note changed while sending" } }
     suspend fun receive(note: SignedNote) = db.withTransaction {

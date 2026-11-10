@@ -91,7 +91,7 @@ class WalletViewModel(private val key: WalletKey, private val repo: WalletReposi
     } catch (e: Exception) { status("Receive failed: ${e.message}") } }
     fun send(note: NoteEntity, device: BluetoothDevice) = viewModelScope.launch { try {
         bluetooth.send(device, { recipient, nonce -> repo.prepareTransfer(note.noteId, recipient, nonce) }, key.publicKey(), ::confirmCode)
-        repo.markTransferred(note.noteId); status("Sent test note. Local copy is marked transferred.")
+        status("Sent test note. It remains uncertain until a durable receipt is recovered.")
     } catch (e: Exception) { status("Send failed: ${e.message}") } }
     fun experiment() { diagnostic.value = key.tryCreateSingleUseExperiment() }
     fun trustIssuer(publicKey: String) = viewModelScope.launch { try { repo.trustIssuer(publicKey, "Local test issuer"); status("Issuer explicitly trusted") } catch (e: Exception) { status("Issuer import failed: ${e.message}") } }
