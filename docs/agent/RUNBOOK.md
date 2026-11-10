@@ -14,4 +14,4 @@ Use `tools/issue-test-note.sh` outside the APK repository to make a provisioned 
 
 The diagnostic card reports the actual OS API level, StrongBox feature flag, and security level of an experimental ECDSA key. It does not establish a trusted balance, current device integrity, or double-spend prevention.
 
-Every GitHub push and pull request runs `.github/workflows/android.yml`: wrapper validation, JVM tests, lint, APK packaging, and debug APK/report artifacts.
+Every GitHub push and pull request runs `.github/workflows/android.yml`: wrapper validation, JVM tests, lint, APK packaging, and debug APK/report artifacts. Successful push builds also create a uniquely tagged GitHub Release containing `app-debug.apk`.

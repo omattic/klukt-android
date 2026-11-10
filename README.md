@@ -38,7 +38,7 @@ scripts/android-doctor.sh
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 ```
 
-GitHub Actions runs the same host checks and creates a fresh debug-APK workflow artifact for every push and pull request. It does not replace physical-device testing.
+GitHub Actions runs the same host checks and creates a fresh debug-APK workflow artifact for every push and pull request. Every successful push additionally creates a GitHub Release with `app-debug.apk` attached. It does not replace physical-device testing.
 
 For an attached, authorised USB device:
 
